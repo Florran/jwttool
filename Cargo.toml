@@ -1,0 +1,10 @@
+[package]
+name = "jwttool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = "0.22.1"
+clap = { version = "4.6.1", features = ["derive"] }
+serde_json = { version = "1.0.150", features = ["preserve_order"] }
+# We'll add crates here one at a time, as we need them.
