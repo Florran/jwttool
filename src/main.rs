@@ -1,34 +1,81 @@
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use clap::Parser;
+mod jwt;
+
+use clap::{Parser, Subcommand};
+
+/// Subcommand to use
+#[derive(Subcommand)]
+enum Command {
+    /// Decode a JWT
+    Decode {
+        /// The JWT to operate on
+        #[arg(short = 't', long = "token")]
+        token: String,
+
+        /// File path for output file
+        #[arg(short = 'o', long = "out-file")]
+        out: Option<String>,
+
+        /// Decode the JWTs header
+        #[arg(long)]
+        header: bool,
+
+        /// Decode the JWTs payload
+        #[arg(long)]
+        payload: bool,
+    },
+}
 
 /// JWT tampering tool for security testing
 #[derive(Parser)]
 struct Cli {
-    /// The JWT to operate on
-    #[arg(short = 't', long = "token")]
-    token: String,
+    #[command(subcommand)]
+    command: Command,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    let parts: Vec<&str> = cli.token.split(".").collect();
-    if parts.len() != 3 {
-        return Err("JWT has to be 3 parts!".into());
+
+    match cli.command {
+        Command::Decode {
+            token,
+            header,
+            payload,
+            out,
+        } => {
+            let token = jwt::parse(&token)?;
+
+            let show_both = !header && !payload;
+            let show_header = header || show_both;
+            let show_payload = payload || show_both;
+
+            if let Some(path) = &out {
+                let mut obj = serde_json::Map::new();
+                if show_header {
+                    obj.insert("header".to_string(), token.header);
+                }
+                if show_payload {
+                    obj.insert("payload".to_string(), token.payload);
+                }
+                let value = serde_json::Value::Object(obj);
+                write_json(path, &value)?;
+            } else {
+                if show_header {
+                    println!("Header:\n{}", serde_json::to_string_pretty(&token.header)?);
+                }
+                if show_payload {
+                    println!(
+                        "Payload:\n{}",
+                        serde_json::to_string_pretty(&token.payload)?
+                    );
+                }
+            }
+        }
     }
 
-    //let header_bytes = URL_SAFE_NO_PAD.decode(parts[0])?;
+    Ok(())
+}
 
-    let decoded_header_bytes = URL_SAFE_NO_PAD.decode(parts[0])?;
-    let decoded_header = String::from_utf8(decoded_header_bytes)?;
-
-    let decoded_payload_bytes = URL_SAFE_NO_PAD.decode(parts[1])?;
-    let decoded_payload = String::from_utf8(decoded_payload_bytes)?;
-
-    let header_json: serde_json::Value = serde_json::from_str(&decoded_header)?;
-    let payload_json: serde_json::Value = serde_json::from_str(&decoded_payload)?;
-
-    println!("{}", serde_json::to_string_pretty(&header_json)?);
-    println!("{}", serde_json::to_string_pretty(&payload_json)?);
-
+fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+    let pretty_string: String = serde_json::to_string_pretty(value)?;
+    std::fs::write(path, pretty_string)?;
     Ok(())
 }
