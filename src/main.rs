@@ -1,6 +1,18 @@
+mod attack;
 mod jwt;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
+
+#[derive(Args)]
+struct CommonArgs {
+    /// The JWT to operate on
+    #[arg(short = 't', long = "token")]
+    token: String,
+
+    /// File path for output file
+    #[arg(short = 'o', long = "out-file")]
+    out: Option<String>,
+}
 
 /// Subcommand to use
 #[derive(Subcommand)]
@@ -22,6 +34,22 @@ enum Command {
         /// Decode the JWTs payload
         #[arg(long)]
         payload: bool,
+    },
+
+    /// Execute JWT attacks
+    Attack {
+        #[command(subcommand)]
+        mode: AttackMode,
+    },
+}
+
+#[derive(Subcommand)]
+enum AttackMode {
+    /// Set alg to none and strip the signature
+    #[command(name = "none")]
+    AlgNone {
+        #[command(flatten)]
+        common: CommonArgs,
     },
 }
 
@@ -69,6 +97,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        Command::Attack { mode } => match mode {
+            AttackMode::AlgNone { common } => {
+                let mut token = jwt::parse(&common.token)?;
+                attack::alg_none(&mut token)?;
+                let encoded_token = token.encode()?;
+
+                if let Some(path) = &common.out {
+                    let value = serde_json::json!({"jwt": encoded_token});
+                    write_json(path, &value)?;
+                } else {
+                    println!("{}", encoded_token)
+                }
+            }
+        },
     }
 
     Ok(())
