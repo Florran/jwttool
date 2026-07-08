@@ -51,6 +51,10 @@ impl Token {
         Ok(())
     }
 
+    pub fn set_claim(&mut self, key: &str, value: serde_json::Value) {
+        self.payload[key] = value;
+    }
+
     pub fn clear_signature(&mut self) {
         self.signature.clear();
     }
@@ -58,6 +62,8 @@ impl Token {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     const VALID_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWUsImlhdCI6MTUxNjIzOTAyMn0.KMUFsIDTnFmyG3nMiGM6H9FNFUROf3wh7SmqJp-QV30";
@@ -129,5 +135,19 @@ mod tests {
         let mut token = parse(VALID_TOKEN).unwrap();
         token.clear_signature();
         assert!(token.signature.is_empty());
+    }
+
+    #[test]
+    fn set_claim_updates_field() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.set_claim("admin", json!(false));
+        assert_eq!(token.payload["admin"], json!(false));
+    }
+
+    #[test]
+    fn set_claim_creates_new_value() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.set_claim("testing", json!("teststring"));
+        assert_eq!(token.payload["testing"], json!("teststring"));
     }
 }

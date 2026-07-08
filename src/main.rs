@@ -19,13 +19,8 @@ struct CommonArgs {
 enum Command {
     /// Decode a JWT
     Decode {
-        /// The JWT to operate on
-        #[arg(short = 't', long = "token")]
-        token: String,
-
-        /// File path for output file
-        #[arg(short = 'o', long = "out-file")]
-        out: Option<String>,
+        #[command(flatten)]
+        common: CommonArgs,
 
         /// Decode the JWTs header
         #[arg(long)]
@@ -50,6 +45,9 @@ enum AttackMode {
     AlgNone {
         #[command(flatten)]
         common: CommonArgs,
+
+        #[arg(long = "set", value_parser = parse_key_val)]
+        pairs: Vec<(String, serde_json::Value)>,
     },
 }
 
@@ -64,18 +62,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match cli.command {
         Command::Decode {
-            token,
+            common,
             header,
             payload,
-            out,
         } => {
-            let token = jwt::parse(&token)?;
+            let token = jwt::parse(&common.token)?;
 
             let show_both = !header && !payload;
             let show_header = header || show_both;
             let show_payload = payload || show_both;
 
-            if let Some(path) = &out {
+            if let Some(path) = &common.out {
                 let mut obj = serde_json::Map::new();
                 if show_header {
                     obj.insert("header".to_string(), token.header);
@@ -98,8 +95,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Attack { mode } => match mode {
-            AttackMode::AlgNone { common } => {
+            AttackMode::AlgNone { common, pairs } => {
                 let mut token = jwt::parse(&common.token)?;
+
+                for (k, v) in pairs {
+                    token.set_claim(&k, v);
+                }
+
                 attack::alg_none(&mut token)?;
                 let encoded_token = token.encode()?;
 
@@ -120,4 +122,15 @@ fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Box<dyn std::
     let pretty_string: String = serde_json::to_string_pretty(value)?;
     std::fs::write(path, pretty_string)?;
     Ok(())
+}
+
+fn parse_key_val(s: &str) -> Result<(String, serde_json::Value), String> {
+    match s.split_once('=') {
+        Some((key, value)) if !key.is_empty() => {
+            let parsed = serde_json::from_str(value)
+                .unwrap_or_else(|_| serde_json::Value::String(value.to_string()));
+            Ok((key.to_string(), parsed))
+        }
+        _ => Err(format!("expected key=value, got {s}")),
+    }
 }
