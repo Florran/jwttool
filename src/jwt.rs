@@ -106,7 +106,8 @@ mod tests {
         let round_trip_token = parse(&reencoded).unwrap();
 
         assert_eq!(token.header["typ"], round_trip_token.header["typ"]);
-        assert_eq!(token.payload["admin"], round_trip_token.payload["admin"])
+        assert_eq!(token.payload["admin"], round_trip_token.payload["admin"]);
+        assert_eq!(token.signature, round_trip_token.signature);
     }
 
     #[test]
