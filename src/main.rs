@@ -96,21 +96,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Attack { mode } => match mode {
             AttackMode::AlgNone { common, pairs } => {
-                let mut token = jwt::parse(&common.token)?;
-
-                for (k, v) in pairs {
-                    token.set_claim(&k, v);
-                }
-
-                attack::alg_none(&mut token)?;
-                let encoded_token = token.encode()?;
-
-                if let Some(path) = &common.out {
-                    let value = serde_json::json!({"jwt": encoded_token});
-                    write_json(path, &value)?;
-                } else {
-                    println!("{}", encoded_token)
-                }
+                run_attack(&common, pairs, attack::alg_none)?;
             }
         },
     }
@@ -121,6 +107,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
     let pretty_string: String = serde_json::to_string_pretty(value)?;
     std::fs::write(path, pretty_string)?;
+    Ok(())
+}
+
+fn run_attack(
+    common: &CommonArgs,
+    pairs: Vec<(String, serde_json::Value)>,
+    attack: impl FnOnce(&mut jwt::Token) -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut token = jwt::parse(&common.token)?;
+    for (k, v) in pairs {
+        token.set_claim(&k, v);
+    }
+
+    attack(&mut token)?;
+    let encoded_token = token.encode()?;
+
+    if let Some(path) = &common.out {
+        let value = serde_json::json!({"jwt": encoded_token});
+        write_json(path, &value)?;
+    } else {
+        println!("{}", encoded_token)
+    }
     Ok(())
 }
 
