@@ -49,6 +49,20 @@ enum AttackMode {
         #[arg(long = "set", value_parser = parse_key_val)]
         pairs: Vec<(String, serde_json::Value)>,
     },
+
+    #[command(name = "alg-confusion")]
+    AlgConfusion {
+        #[command(flatten)]
+        common: CommonArgs,
+
+        /// Claim to set/modify (key=value)
+        #[arg(long = "set", value_parser = parse_key_val)]
+        pairs: Vec<(String, serde_json::Value)>,
+
+        /// Public key to sign with
+        #[arg(long = "key")]
+        key: String,
+    },
 }
 
 /// JWT tampering tool for security testing
@@ -97,6 +111,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Attack { mode } => match mode {
             AttackMode::AlgNone { common, pairs } => {
                 run_attack(&common, pairs, attack::alg_none)?;
+            }
+            AttackMode::AlgConfusion { common, pairs, key } => {
+                run_attack(&common, pairs, |token| {
+                    attack::alg_confusion(token, key.as_bytes())
+                })?;
             }
         },
     }

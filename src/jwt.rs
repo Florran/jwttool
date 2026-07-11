@@ -1,6 +1,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>; // a type alias: "HMAC using SHA-256"
+
 const ALGORITHMS: &[&str] = &["none", "HS256"];
 
 pub struct Token {
@@ -32,14 +37,10 @@ pub fn parse(encoded: &str) -> Result<Token, Box<dyn std::error::Error>> {
 
 impl Token {
     pub fn encode(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let decoded_header_bytes = serde_json::to_vec(&self.header)?;
-        let decoded_payload_bytes = serde_json::to_vec(&self.payload)?;
-
-        let encoded_header = URL_SAFE_NO_PAD.encode(decoded_header_bytes);
-        let encoded_payload = URL_SAFE_NO_PAD.encode(decoded_payload_bytes);
+        let signing_input = self.signing_input()?;
         let encoded_signature = URL_SAFE_NO_PAD.encode(&self.signature);
 
-        let encoded_token = [encoded_header, encoded_payload, encoded_signature].join(".");
+        let encoded_token = [signing_input, encoded_signature].join(".");
         return Ok(encoded_token);
     }
 
@@ -57,6 +58,26 @@ impl Token {
 
     pub fn clear_signature(&mut self) {
         self.signature.clear();
+    }
+
+    pub fn signing_input(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let decoded_header_bytes = serde_json::to_vec(&self.header)?;
+        let decoded_payload_bytes = serde_json::to_vec(&self.payload)?;
+
+        let encoded_header = URL_SAFE_NO_PAD.encode(decoded_header_bytes);
+        let encoded_payload = URL_SAFE_NO_PAD.encode(decoded_payload_bytes);
+
+        let signing_input = [encoded_header, encoded_payload].join(".");
+
+        return Ok(signing_input);
+    }
+
+    pub fn sign_hs256(&mut self, key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+        let mut mac = HmacSha256::new_from_slice(key)?;
+        mac.update(self.signing_input()?.as_bytes());
+        let result = mac.finalize().into_bytes();
+        self.signature = result.to_vec();
+        Ok(())
     }
 }
 
@@ -149,5 +170,45 @@ mod tests {
         let mut token = parse(VALID_TOKEN).unwrap();
         token.set_claim("testing", json!("teststring"));
         assert_eq!(token.payload["testing"], json!("teststring"));
+    }
+
+    #[test]
+    fn signing_input_is_header_dot_payload() {
+        let token = parse(VALID_TOKEN).unwrap();
+        let valid_signing_input = VALID_TOKEN.rsplit_once('.').unwrap().0;
+
+        let signing_input = token.signing_input().unwrap();
+
+        assert_eq!(signing_input, valid_signing_input);
+    }
+
+    #[test]
+    fn sign_hs256_valid_signature_length() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.sign_hs256(b"secret").unwrap();
+
+        assert_eq!(token.signature.len(), 32);
+    }
+
+    #[test]
+    fn sign_hs256_reproduces_twice() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.sign_hs256(b"secret").unwrap();
+
+        let mut token2 = parse(VALID_TOKEN).unwrap();
+        token2.sign_hs256(b"secret").unwrap();
+
+        assert_eq!(token.signature, token2.signature);
+    }
+
+    #[test]
+    fn sign_hs256_different_secret_different_signature() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.sign_hs256(b"secret").unwrap();
+
+        let mut token2 = parse(VALID_TOKEN).unwrap();
+        token2.sign_hs256(b"secret2").unwrap();
+
+        assert_ne!(token.signature, token2.signature);
     }
 }
