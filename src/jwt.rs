@@ -85,10 +85,18 @@ impl Token {
     }
 
     pub fn verify_hs256(&self, key: &[u8]) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut mac = HmacSha256::new_from_slice(key)?;
-        mac.update(self.signing_input()?.as_bytes());
-        Ok(mac.verify_slice(&self.signature).is_ok())
+        let signing_input = self.signing_input()?;
+        Ok(hmac_sha256_matches(&signing_input, key, &self.signature))
     }
+}
+
+pub fn hmac_sha256_matches(signing_input: &str, key: &[u8], expected: &[u8]) -> bool {
+    let mut mac = match HmacSha256::new_from_slice(key) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(signing_input.as_bytes());
+    mac.verify_slice(expected).is_ok()
 }
 
 #[cfg(test)]

@@ -43,11 +43,22 @@ enum Command {
 
     /// Use dictionary to bruteforce the JWTs secret
     Dictionary {
-        #[command(flatten)]
-        common: CommonArgs,
+        #[arg(short = 't', long = "token")]
+        token: String,
 
+        /// Wordlist to use for the bruteforce
         #[arg(long = "wordlist", short = 'w')]
         wordlist: String,
+    },
+
+    /// Verify a tokens signature against a specified key
+    Verify {
+        #[arg(short = 't', long = "token")]
+        token: String,
+
+        /// Key to check against
+        #[arg(long = "key")]
+        key: String,
     },
 }
 
@@ -161,8 +172,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
             })?,
         },
-        Command::Dictionary { common, wordlist } => {
-            let token = jwt::parse(&common.token)?;
+        Command::Dictionary { token, wordlist } => {
+            let token = jwt::parse(&token)?;
             let lines: Vec<String> = BufReader::new(File::open(&wordlist)?)
                 .lines()
                 .collect::<Result<_, _>>()?;
@@ -170,6 +181,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match dictionary::crack(&token, &lines)? {
                 Some(secret) => println!("secret found: {secret}"),
                 None => println!("no secret found"),
+            }
+        }
+        Command::Verify { token, key } => {
+            let token = jwt::parse(&token)?;
+            if token.header["alg"] != "HS256" {
+                return Err("verify only supports HS256 tokens".into());
+            }
+            let result = token.verify_hs256(key.as_bytes())?;
+            if result {
+                println!("Key successfully verified against token signature");
+            } else {
+                println!("Key does not match token signature");
             }
         }
     }

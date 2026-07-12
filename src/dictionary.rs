@@ -1,8 +1,5 @@
 use crate::jwt::Token;
 
-use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
-
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -28,8 +25,6 @@ pub fn crack(
     let result = Mutex::new(None);
     let result = &result;
 
-    type HmacSha256 = Hmac<Sha256>; // a type alias: "HMAC using SHA-256"
-
     std::thread::scope(|s| {
         for chunk in candidates.chunks(chunk_size) {
             s.spawn(move || {
@@ -37,11 +32,14 @@ pub fn crack(
                     if found.load(Ordering::Relaxed) {
                         break;
                     }
-                    let mut mac = HmacSha256::new_from_slice(candidate.as_bytes()).unwrap();
-                    mac.update(signing_input.as_bytes());
-                    if mac.verify_slice(expected).is_ok() {
+                    if crate::jwt::hmac_sha256_matches(
+                        signing_input,
+                        candidate.as_bytes(),
+                        expected,
+                    ) {
                         found.store(true, Ordering::Relaxed);
                         *result.lock().unwrap() = Some(candidate.clone());
+                        break;
                     }
                 }
             });
