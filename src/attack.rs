@@ -3,7 +3,7 @@ use crate::jwt::Token;
 pub fn alg_none(token: &mut Token) -> Result<(), Box<dyn std::error::Error>> {
     token.set_alg("none")?;
     token.clear_signature();
-    return Ok(());
+    Ok(())
 }
 
 pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
@@ -12,7 +12,18 @@ pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<(), Box<dyn std::e
     }
     token.set_alg("HS256")?;
     token.sign_hs256(key)?;
-    return Ok(());
+    Ok(())
+}
+
+pub fn kid_injection(
+    token: &mut Token,
+    kid: serde_json::Value,
+    key: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    token.set_header("kid", kid);
+    token.set_alg("HS256")?;
+    token.sign_hs256(key)?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -55,5 +66,34 @@ mod tests {
         let result = alg_confusion(&mut token, b"secret");
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn kid_injection_injects_kid() {
+        let mut token = sample_token();
+        kid_injection(
+            &mut token,
+            serde_json::Value::String("random".to_string()),
+            b"secret",
+        )
+        .unwrap();
+
+        assert_eq!(token.header["kid"], "random");
+        assert_eq!(token.header["alg"], "HS256");
+        assert_eq!(token.signature.len(), 32);
+    }
+
+    #[test]
+    fn empty_key_still_produces_valid_signature() {
+        let mut token = sample_token();
+        kid_injection(
+            &mut token,
+            serde_json::Value::String("random".to_string()),
+            b"",
+        )
+        .unwrap();
+        assert_eq!(token.header["kid"], "random");
+        assert_eq!(token.header["alg"], "HS256");
+        assert_eq!(token.signature.len(), 32);
     }
 }

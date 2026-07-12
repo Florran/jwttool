@@ -32,7 +32,7 @@ pub fn parse(encoded: &str) -> Result<Token, Box<dyn std::error::Error>> {
         signature: URL_SAFE_NO_PAD.decode(parts[2])?,
     };
 
-    return Ok(token);
+    Ok(token)
 }
 
 impl Token {
@@ -41,7 +41,7 @@ impl Token {
         let encoded_signature = URL_SAFE_NO_PAD.encode(&self.signature);
 
         let encoded_token = [signing_input, encoded_signature].join(".");
-        return Ok(encoded_token);
+        Ok(encoded_token)
     }
 
     pub fn set_alg(&mut self, alg: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -54,6 +54,10 @@ impl Token {
 
     pub fn set_claim(&mut self, key: &str, value: serde_json::Value) {
         self.payload[key] = value;
+    }
+
+    pub fn set_header(&mut self, key: &str, value: serde_json::Value) {
+        self.header[key] = value;
     }
 
     pub fn clear_signature(&mut self) {
@@ -69,7 +73,7 @@ impl Token {
 
         let signing_input = [encoded_header, encoded_payload].join(".");
 
-        return Ok(signing_input);
+        Ok(signing_input)
     }
 
     pub fn sign_hs256(&mut self, key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
