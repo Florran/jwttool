@@ -83,6 +83,12 @@ impl Token {
         self.signature = result.to_vec();
         Ok(())
     }
+
+    pub fn verify_hs256(&self, key: &[u8]) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut mac = HmacSha256::new_from_slice(key)?;
+        mac.update(self.signing_input()?.as_bytes());
+        Ok(mac.verify_slice(&self.signature).is_ok())
+    }
 }
 
 #[cfg(test)]
@@ -214,5 +220,13 @@ mod tests {
         token2.sign_hs256(b"secret2").unwrap();
 
         assert_ne!(token.signature, token2.signature);
+    }
+
+    #[test]
+    fn verify_hs256_verifies_correctly() {
+        let mut token = parse(VALID_TOKEN).unwrap();
+        token.sign_hs256(b"secret").unwrap();
+        assert!(token.verify_hs256(b"secret").unwrap());
+        assert!(!token.verify_hs256(b"notmysecret").unwrap());
     }
 }

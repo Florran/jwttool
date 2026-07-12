@@ -1,5 +1,9 @@
 mod attack;
+mod dictionary;
 mod jwt;
+
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 
 use clap::{Args, Parser, Subcommand};
 
@@ -35,6 +39,15 @@ enum Command {
     Attack {
         #[command(subcommand)]
         mode: AttackMode,
+    },
+
+    /// Use dictionary to bruteforce the JWTs secret
+    Dictionary {
+        #[command(flatten)]
+        common: CommonArgs,
+
+        #[arg(long = "wordlist", short = 'w')]
+        wordlist: String,
     },
 }
 
@@ -148,6 +161,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
             })?,
         },
+        Command::Dictionary { common, wordlist } => {
+            let token = jwt::parse(&common.token)?;
+            let lines: Vec<String> = BufReader::new(File::open(&wordlist)?)
+                .lines()
+                .collect::<Result<_, _>>()?;
+
+            match dictionary::crack(&token, &lines)? {
+                Some(secret) => println!("secret found: {secret}"),
+                None => println!("no secret found"),
+            }
+        }
     }
 
     Ok(())
