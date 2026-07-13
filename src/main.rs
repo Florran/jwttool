@@ -13,50 +13,52 @@ struct CommonArgs {
     #[arg(short = 't', long = "token")]
     token: String,
 
-    /// File path for output file
+    /// Write the result as JSON to this file instead of stdout
     #[arg(short = 'o', long = "out-file")]
     out: Option<String>,
 }
 
-/// Subcommand to use
+/// The action to run
 #[derive(Subcommand)]
 enum Command {
-    /// Decode a JWT
+    /// Decode and print a token's header and payload
     Decode {
         #[command(flatten)]
         common: CommonArgs,
 
-        /// Decode the JWTs header
+        /// Show only the header
         #[arg(long)]
         header: bool,
 
-        /// Decode the JWTs payload
+        /// Show only the payload
         #[arg(long)]
         payload: bool,
     },
 
-    /// Execute JWT attacks
+    /// Tamper with a token using a chosen attack
     Attack {
         #[command(subcommand)]
         mode: AttackMode,
     },
 
-    /// Use dictionary to bruteforce the JWTs secret
+    /// Crack an HS256 secret using a wordlist
     Dictionary {
+        /// The JWT to operate on
         #[arg(short = 't', long = "token")]
         token: String,
 
-        /// Wordlist to use for the bruteforce
+        /// Path to the wordlist file
         #[arg(long = "wordlist", short = 'w')]
         wordlist: String,
     },
 
-    /// Verify a tokens signature against a specified key
+    /// Check whether a key produces the token's signature
     Verify {
+        /// The JWT to operate on
         #[arg(short = 't', long = "token")]
         token: String,
 
-        /// Key to check against
+        /// The secret key to verify against
         #[arg(long = "key")]
         key: String,
     },
@@ -64,44 +66,47 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AttackMode {
-    /// Set alg to none and strip the signature
+    /// Set alg to none and remove the signature
     #[command(name = "none")]
     AlgNone {
         #[command(flatten)]
         common: CommonArgs,
 
+        /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
         pairs: Vec<(String, serde_json::Value)>,
     },
 
+    /// Re-sign an RS256 token as HS256 using a chosen key
     #[command(name = "alg-confusion")]
     AlgConfusion {
         #[command(flatten)]
         common: CommonArgs,
 
-        /// Claim to set/modify (key=value)
+        /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
         pairs: Vec<(String, serde_json::Value)>,
 
-        /// Public key to sign with
+        /// Key to sign with
         #[arg(long = "key")]
         key: String,
     },
 
+    /// Inject a kid header and sign with a chosen key
     #[command(name = "kid-injection")]
     KidInjection {
         #[command(flatten)]
         common: CommonArgs,
 
-        /// Claim to set/modify (key=value)
+        /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
         pairs: Vec<(String, serde_json::Value)>,
 
-        /// Value to set kid to
+        /// Value to set the kid header to
         #[arg(long)]
         kid: String,
 
-        /// Public key to sign with
+        /// Key to sign with
         #[arg(long = "key")]
         key: String,
     },
@@ -147,13 +152,10 @@ fn run() -> Result<(), Error> {
                 write_json(path, &value)?;
             } else {
                 if show_header {
-                    println!("Header:\n{}", serde_json::to_string_pretty(&token.header)?);
+                    println!("header:\n{}", serde_json::to_string_pretty(&token.header)?);
                 }
                 if show_payload {
-                    println!(
-                        "Payload:\n{}",
-                        serde_json::to_string_pretty(&token.payload)?
-                    );
+                    println!("payload:\n{}", serde_json::to_string_pretty(&token.payload)?);
                 }
             }
         }
@@ -199,9 +201,9 @@ fn run() -> Result<(), Error> {
             }
             let result = token.verify_hs256(key.as_bytes())?;
             if result {
-                println!("Key successfully verified against token signature");
+                println!("key matches signature");
             } else {
-                println!("Key does not match token signature");
+                println!("key does not match signature");
             }
         }
     }
