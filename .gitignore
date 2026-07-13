@@ -21,3 +21,8 @@ target
 #.idea/
 
 reference
+
+# AI agent instruction files
+CLAUDE.md
+AGENTS.md
+.claude/

@@ -1,11 +1,11 @@
-mod attack;
-mod dictionary;
-mod jwt;
+use jwttool::{attack, dictionary, jwt};
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 use clap::{Args, Parser, Subcommand};
+
+use jwttool::error::Error;
 
 #[derive(Args)]
 struct CommonArgs {
@@ -113,7 +113,14 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 }
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<(), Error> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -186,7 +193,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Verify { token, key } => {
             let token = jwt::parse(&token)?;
             if token.header["alg"] != "HS256" {
-                return Err("verify only supports HS256 tokens".into());
+                return Err(Error::UnsupportedAlg(
+                    "verify only supports HS256 tokens".into(),
+                ));
             }
             let result = token.verify_hs256(key.as_bytes())?;
             if result {
@@ -200,7 +209,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Box<dyn std::error::Error>> {
+fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Error> {
     let pretty_string: String = serde_json::to_string_pretty(value)?;
     std::fs::write(path, pretty_string)?;
     Ok(())
@@ -209,8 +218,8 @@ fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Box<dyn std::
 fn run_attack(
     common: &CommonArgs,
     pairs: Vec<(String, serde_json::Value)>,
-    attack: impl FnOnce(&mut jwt::Token) -> Result<(), Box<dyn std::error::Error>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+    attack: impl FnOnce(&mut jwt::Token) -> Result<(), Error>,
+) -> Result<(), Error> {
     let mut token = jwt::parse(&common.token)?;
     for (k, v) in pairs {
         token.set_claim(&k, v);

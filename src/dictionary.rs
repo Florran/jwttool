@@ -1,14 +1,14 @@
+use crate::error::Error;
 use crate::jwt::Token;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-pub fn crack(
-    token: &Token,
-    candidates: &[String],
-) -> Result<Option<String>, Box<dyn std::error::Error>> {
+pub fn crack(token: &Token, candidates: &[String]) -> Result<Option<String>, Error> {
     if token.header["alg"] != "HS256" {
-        return Err("dictionary only supports HS256 tokens".into());
+        return Err(Error::UnsupportedAlg(
+            "dictionary only supports HS256 tokens".into(),
+        ));
     }
 
     let n = std::thread::available_parallelism()?.get(); // get core count, for thread count

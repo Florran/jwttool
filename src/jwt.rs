@@ -4,6 +4,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 
+use crate::error::{Error, Result};
+
 type HmacSha256 = Hmac<Sha256>; // a type alias: "HMAC using SHA-256"
 
 const ALGORITHMS: &[&str] = &["none", "HS256"];
@@ -14,10 +16,10 @@ pub struct Token {
     pub signature: Vec<u8>,
 }
 
-pub fn parse(encoded: &str) -> Result<Token, Box<dyn std::error::Error>> {
+pub fn parse(encoded: &str) -> Result<Token> {
     let parts: Vec<&str> = encoded.split('.').collect();
     if parts.len() != 3 {
-        return Err("JWT has to be 3 parts!".into());
+        return Err(Error::InvalidToken("JWT has to be 3 parts!".into()));
     }
 
     let decoded_header_bytes = URL_SAFE_NO_PAD.decode(parts[0])?;
@@ -36,7 +38,7 @@ pub fn parse(encoded: &str) -> Result<Token, Box<dyn std::error::Error>> {
 }
 
 impl Token {
-    pub fn encode(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn encode(&self) -> Result<String> {
         let signing_input = self.signing_input()?;
         let encoded_signature = URL_SAFE_NO_PAD.encode(&self.signature);
 
@@ -44,9 +46,9 @@ impl Token {
         Ok(encoded_token)
     }
 
-    pub fn set_alg(&mut self, alg: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_alg(&mut self, alg: &str) -> Result<()> {
         if !ALGORITHMS.contains(&alg) {
-            return Err("invalid alg".into());
+            return Err(Error::InvalidAlgorithm("invalid alg".into()));
         }
         self.header["alg"] = serde_json::Value::from(alg);
         Ok(())
@@ -64,7 +66,7 @@ impl Token {
         self.signature.clear();
     }
 
-    pub fn signing_input(&self) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn signing_input(&self) -> Result<String> {
         let decoded_header_bytes = serde_json::to_vec(&self.header)?;
         let decoded_payload_bytes = serde_json::to_vec(&self.payload)?;
 
@@ -76,7 +78,7 @@ impl Token {
         Ok(signing_input)
     }
 
-    pub fn sign_hs256(&mut self, key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn sign_hs256(&mut self, key: &[u8]) -> Result<()> {
         let mut mac = HmacSha256::new_from_slice(key)?;
         mac.update(self.signing_input()?.as_bytes());
         let result = mac.finalize().into_bytes();
@@ -84,7 +86,7 @@ impl Token {
         Ok(())
     }
 
-    pub fn verify_hs256(&self, key: &[u8]) -> Result<bool, Box<dyn std::error::Error>> {
+    pub fn verify_hs256(&self, key: &[u8]) -> Result<bool> {
         let signing_input = self.signing_input()?;
         Ok(hmac_sha256_matches(&signing_input, key, &self.signature))
     }

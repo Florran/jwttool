@@ -1,25 +1,24 @@
+use crate::error::{Error, Result};
 use crate::jwt::Token;
 
-pub fn alg_none(token: &mut Token) -> Result<(), Box<dyn std::error::Error>> {
+pub fn alg_none(token: &mut Token) -> Result<()> {
     token.set_alg("none")?;
     token.clear_signature();
     Ok(())
 }
 
-pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<()> {
     if !token.header["alg"].as_str().unwrap_or("").starts_with("RS") {
-        return Err("Token needs to use asymmetric algorithm like RS256".into());
+        return Err(Error::InvalidAlgorithm(
+            "Token needs to use asymmetric algorithm like RS256".into(),
+        ));
     }
     token.set_alg("HS256")?;
     token.sign_hs256(key)?;
     Ok(())
 }
 
-pub fn kid_injection(
-    token: &mut Token,
-    kid: serde_json::Value,
-    key: &[u8],
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn kid_injection(token: &mut Token, kid: serde_json::Value, key: &[u8]) -> Result<()> {
     token.set_header("kid", kid);
     token.set_alg("HS256")?;
     token.sign_hs256(key)?;
