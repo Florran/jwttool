@@ -1,5 +1,6 @@
 use crate::error::{Error, Result};
 use crate::jwt::Token;
+use base64::Engine;
 use malachite::Natural;
 use malachite::base::num::arithmetic::traits::ModPow;
 use malachite::base::num::arithmetic::traits::{Gcd, Pow};
@@ -62,6 +63,96 @@ fn verifies(token: &Token, e: u32, n: &Natural) -> Result<bool> {
     Ok(s.mod_pow(Natural::from(e), n) == em)
 }
 
+fn der_len(n: usize) -> Vec<u8> {
+    if n < 0x80 {
+        return vec![n as u8];
+    }
+    let be = n.to_be_bytes();
+    let start = be.iter().position(|&b| b != 0).unwrap();
+    let trimmed = &be[start..];
+    let mut out = vec![0x80 | trimmed.len() as u8];
+    out.extend_from_slice(trimmed);
+    out
+}
+
+fn der_integer(value: &Natural) -> Vec<u8> {
+    let mut content: Vec<u8> = value.to_power_of_2_digits_desc(8);
+    if content.first().map_or(true, |&b| b & 0x80 != 0) {
+        content.insert(0, 0x00); // keep a high top bit from reading as negative
+    }
+    let mut out = vec![0x02];
+    out.extend(der_len(content.len()));
+    out.extend(content);
+    out
+}
+
+fn der_sequence(elements: &[&[u8]]) -> Vec<u8> {
+    let content = elements.concat();
+    let mut out = vec![0x30];
+    out.extend(der_len(content.len()));
+    out.extend(content);
+    out
+}
+
+fn rsa_public_key_der(n: &Natural, e: u32) -> Vec<u8> {
+    let modulus = der_integer(n);
+    let exponent = der_integer(&Natural::from(e));
+    der_sequence(&[modulus.as_slice(), exponent.as_slice()])
+}
+
+// rsaEncryption OID (1.2.840.113549.1.1.1) with NULL parameters
+const RSA_ALGORITHM_ID: [u8; 15] = [
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+];
+
+fn spki_der(n: &Natural, e: u32) -> Vec<u8> {
+    let pkcs1 = rsa_public_key_der(n, e);
+
+    let mut bit_string_body = vec![0x00]; // unused-bits count
+    bit_string_body.extend_from_slice(&pkcs1);
+    let mut bit_string = vec![0x03];
+    bit_string.extend(der_len(bit_string_body.len()));
+    bit_string.extend(bit_string_body);
+
+    der_sequence(&[RSA_ALGORITHM_ID.as_slice(), bit_string.as_slice()])
+}
+
+fn pem_block(der: &[u8], label: &str, wrap: bool) -> String {
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let body = if wrap {
+        b64.as_bytes()
+            .chunks(64)
+            .map(|c| std::str::from_utf8(c).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        b64
+    };
+    format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----")
+}
+
+pub fn public_key_pem(n: &Natural, e: u32) -> String {
+    format!("{}\n", pem_block(&spki_der(n, e), "PUBLIC KEY", true))
+}
+
+pub fn public_key_variants(n: &Natural, e: u32) -> Vec<String> {
+    let pkcs1 = rsa_public_key_der(n, e);
+    let spki = spki_der(n, e);
+
+    let mut out = Vec::new();
+    for (der, label) in [
+        (pkcs1.as_slice(), "RSA PUBLIC KEY"),
+        (spki.as_slice(), "PUBLIC KEY"),
+    ] {
+        for wrap in [true, false] {
+            let block = pem_block(der, label, wrap);
+            out.push(format!("{block}\n"));
+            out.push(block);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,5 +201,39 @@ mod tests {
         let recovered = recover_modulus(&a, &b, 65537).unwrap();
         let expected = Natural::from_string_base(16, N65537_HEX).unwrap();
         assert_eq!(recovered, expected);
+    }
+
+    #[test]
+    fn der_len_short_and_long_form() {
+        assert_eq!(der_len(2), vec![0x02]);
+        assert_eq!(der_len(127), vec![0x7f]);
+        assert_eq!(der_len(128), vec![0x81, 0x80]);
+        assert_eq!(der_len(256), vec![0x82, 0x01, 0x00]);
+    }
+
+    #[test]
+    fn der_integer_pads_when_high_bit_set() {
+        // 0x80 has its top bit set, so it needs a 0x00 sign pad.
+        assert_eq!(der_integer(&Natural::from(0x80u32)), vec![0x02, 0x02, 0x00, 0x80]);
+        // 0x7f does not.
+        assert_eq!(der_integer(&Natural::from(0x7fu32)), vec![0x02, 0x01, 0x7f]);
+    }
+
+    #[test]
+    fn spki_pem_has_armor() {
+        let n = Natural::from_string_base(16, N_HEX).unwrap();
+        let pem = public_key_pem(&n, 65537);
+        assert!(pem.starts_with("-----BEGIN PUBLIC KEY-----\n"));
+        assert!(pem.trim_end().ends_with("-----END PUBLIC KEY-----"));
+        assert!(pem.ends_with('\n'));
+    }
+
+    #[test]
+    fn variants_are_byte_distinct() {
+        let n = Natural::from_string_base(16, N_HEX).unwrap();
+        let variants = public_key_variants(&n, 65537);
+        assert_eq!(variants.len(), 8);
+        let unique: std::collections::HashSet<_> = variants.iter().collect();
+        assert_eq!(unique.len(), 8);
     }
 }

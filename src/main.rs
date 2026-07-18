@@ -73,6 +73,14 @@ enum Command {
         /// Second JWT to use for the public key recovery
         #[arg(short = 'b')]
         token_b: String,
+
+        /// Output the raw modulus N in hex instead of a PEM key
+        #[arg(long)]
+        raw: bool,
+
+        /// Output every byte-distinct PEM serialization to try against a target
+        #[arg(long)]
+        variants: bool,
     },
 }
 
@@ -221,12 +229,31 @@ fn run() -> Result<(), Error> {
                 println!("key does not match signature");
             }
         }
-        Command::RecoverKey { token_a, token_b } => {
+        Command::RecoverKey {
+            token_a,
+            token_b,
+            raw,
+            variants,
+        } => {
             let a = jwt::parse(&token_a)?;
             let b = jwt::parse(&token_b)?;
-            let n = recover::recover_modulus(&a, &b, 65537)
-                .or_else(|_| recover::recover_modulus(&a, &b, 3))?;
-            println!("{n:x}");
+            let (n, e) = recover::recover_modulus(&a, &b, 65537)
+                .map(|n| (n, 65537))
+                .or_else(|_| recover::recover_modulus(&a, &b, 3).map(|n| (n, 3)))?;
+
+            if raw {
+                println!("{n:x}");
+            } else if variants {
+                for variant in recover::public_key_variants(&n, e) {
+                    print!("{variant}");
+                    if !variant.ends_with('\n') {
+                        println!();
+                    }
+                    println!();
+                }
+            } else {
+                print!("{}", recover::public_key_pem(&n, e));
+            }
         }
     }
 
