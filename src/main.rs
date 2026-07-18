@@ -1,3 +1,4 @@
+use jwttool::recover;
 use jwttool::{attack, dictionary, jwt};
 
 use std::fs::File;
@@ -61,6 +62,17 @@ enum Command {
         /// The secret key to verify against
         #[arg(long = "key")]
         key: String,
+    },
+
+    /// Derive RSA public key from two different tokens signed with the same private key
+    RecoverKey {
+        /// First JWT to use for the public key recovery
+        #[arg(short = 'a')]
+        token_a: String,
+
+        /// Second JWT to use for the public key recovery
+        #[arg(short = 'b')]
+        token_b: String,
     },
 }
 
@@ -155,7 +167,10 @@ fn run() -> Result<(), Error> {
                     println!("header:\n{}", serde_json::to_string_pretty(&token.header)?);
                 }
                 if show_payload {
-                    println!("payload:\n{}", serde_json::to_string_pretty(&token.payload)?);
+                    println!(
+                        "payload:\n{}",
+                        serde_json::to_string_pretty(&token.payload)?
+                    );
                 }
             }
         }
@@ -205,6 +220,13 @@ fn run() -> Result<(), Error> {
             } else {
                 println!("key does not match signature");
             }
+        }
+        Command::RecoverKey { token_a, token_b } => {
+            let a = jwt::parse(&token_a)?;
+            let b = jwt::parse(&token_b)?;
+            let n = recover::recover_modulus(&a, &b, 65537)
+                .or_else(|_| recover::recover_modulus(&a, &b, 3))?;
+            println!("{n:x}");
         }
     }
 
