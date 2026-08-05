@@ -9,14 +9,21 @@ use clap::{Args, Parser, Subcommand};
 use jwttool::error::Error;
 
 #[derive(Args)]
-struct CommonArgs {
+struct TokenArgs {
     /// The JWT to operate on
     #[arg(short = 't', long = "token")]
     token: String,
+}
 
-    /// Write the result as JSON to this file instead of stdout
-    #[arg(short = 'o', long = "out-file")]
+#[derive(Args)]
+struct OutputArgs {
+    /// Path to output file
+    #[arg(short = 'o', long = "output", value_name = "FILE")]
     out: Option<String>,
+
+    /// Output in json format
+    #[arg(long = "json")]
+    json: bool,
 }
 
 /// The action to run
@@ -25,7 +32,10 @@ enum Command {
     /// Decode and print a token's header and payload
     Decode {
         #[command(flatten)]
-        common: CommonArgs,
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Show only the header
         #[arg(long)]
@@ -44,9 +54,11 @@ enum Command {
 
     /// Crack an HS256 secret using a wordlist
     Dictionary {
-        /// The JWT to operate on
-        #[arg(short = 't', long = "token")]
-        token: String,
+        #[command(flatten)]
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Path to the wordlist file
         #[arg(long = "wordlist", short = 'w')]
@@ -55,9 +67,11 @@ enum Command {
 
     /// Check whether a key produces the token's signature
     Verify {
-        /// The JWT to operate on
-        #[arg(short = 't', long = "token")]
-        token: String,
+        #[command(flatten)]
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// The secret key to verify against
         #[arg(long = "key")]
@@ -73,6 +87,9 @@ enum Command {
         /// Second JWT to use for the public key recovery
         #[arg(short = 'b')]
         token_b: String,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Output the raw modulus N in hex instead of a PEM key
         #[arg(long)]
@@ -90,7 +107,10 @@ enum AttackMode {
     #[command(name = "none")]
     AlgNone {
         #[command(flatten)]
-        common: CommonArgs,
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
@@ -101,7 +121,10 @@ enum AttackMode {
     #[command(name = "alg-confusion")]
     AlgConfusion {
         #[command(flatten)]
-        common: CommonArgs,
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
@@ -116,7 +139,10 @@ enum AttackMode {
     #[command(name = "kid-injection")]
     KidInjection {
         #[command(flatten)]
-        common: CommonArgs,
+        input: TokenArgs,
+
+        #[command(flatten)]
+        output: OutputArgs,
 
         /// Set a payload claim (key=value)
         #[arg(long = "set", value_parser = parse_key_val)]
@@ -150,53 +176,59 @@ fn run() -> Result<(), Error> {
 
     match cli.command {
         Command::Decode {
-            common,
+            input,
             header,
             payload,
+            output,
         } => {
-            let token = jwt::parse(&common.token)?;
+            let token = jwt::parse(&input.token)?;
 
             let show_both = !header && !payload;
             let show_header = header || show_both;
             let show_payload = payload || show_both;
 
-            if let Some(path) = &common.out {
-                let mut obj = serde_json::Map::new();
-                if show_header {
-                    obj.insert("header".to_string(), token.header);
-                }
-                if show_payload {
-                    obj.insert("payload".to_string(), token.payload);
-                }
-                let value = serde_json::Value::Object(obj);
-                write_json(path, &value)?;
-            } else {
-                if show_header {
-                    println!("header:\n{}", serde_json::to_string_pretty(&token.header)?);
-                }
-                if show_payload {
-                    println!(
-                        "payload:\n{}",
-                        serde_json::to_string_pretty(&token.payload)?
-                    );
-                }
+            let mut parts: Vec<String> = Vec::new();
+            let mut obj = serde_json::Map::new();
+
+            if show_header {
+                parts.push(format!(
+                    "header:\n{}",
+                    serde_json::to_string_pretty(&token.header)?
+                ));
+                obj.insert("header".to_string(), token.header);
             }
+            if show_payload {
+                parts.push(format!(
+                    "payload:\n{}",
+                    serde_json::to_string_pretty(&token.payload)?
+                ));
+                obj.insert("payload".to_string(), token.payload);
+            }
+            emit(&parts.join("\n"), serde_json::Value::Object(obj), &output)?;
         }
         Command::Attack { mode } => match mode {
-            AttackMode::AlgNone { common, pairs } => run_attack(&common, pairs, attack::alg_none)?,
+            AttackMode::AlgNone {
+                input,
+                pairs,
+                output,
+            } => run_attack(&input, &output, pairs, attack::alg_none)?,
 
-            AttackMode::AlgConfusion { common, pairs, key } => {
-                run_attack(&common, pairs, |token| {
-                    attack::alg_confusion(token, key.as_bytes())
-                })?
-            }
+            AttackMode::AlgConfusion {
+                input,
+                pairs,
+                key,
+                output,
+            } => run_attack(&input, &output, pairs, |token| {
+                attack::alg_confusion(token, key.as_bytes())
+            })?,
 
             AttackMode::KidInjection {
-                common,
+                input,
                 pairs,
                 kid,
                 key,
-            } => run_attack(&common, pairs, |token| {
+                output,
+            } => run_attack(&input, &output, pairs, |token| {
                 attack::kid_injection(
                     token,
                     serde_json::Value::String(kid.to_string()),
@@ -204,36 +236,52 @@ fn run() -> Result<(), Error> {
                 )
             })?,
         },
-        Command::Dictionary { token, wordlist } => {
-            let token = jwt::parse(&token)?;
+        Command::Dictionary {
+            input,
+            wordlist,
+            output,
+        } => {
+            let token = jwt::parse(&input.token)?;
             let lines: Vec<String> = BufReader::new(File::open(&wordlist)?)
                 .lines()
                 .collect::<Result<_, _>>()?;
 
-            match dictionary::crack(&token, &lines)? {
-                Some(secret) => println!("secret found: {secret}"),
-                None => println!("no secret found"),
-            }
+            let secret = dictionary::crack(&token, &lines)?;
+
+            let text = match &secret {
+                Some(s) => format!("secret found: {s}"),
+                None => "no secret found".to_string(),
+            };
+            emit(
+                &text,
+                serde_json::json!({"success": secret.is_some(), "secret": secret }),
+                &output,
+            )?;
         }
-        Command::Verify { token, key } => {
-            let token = jwt::parse(&token)?;
+        Command::Verify { input, key, output } => {
+            let token = jwt::parse(&input.token)?;
             if token.header["alg"] != "HS256" {
                 return Err(Error::UnsupportedAlg(
                     "verify only supports HS256 tokens".into(),
                 ));
             }
             let result = token.verify_hs256(key.as_bytes())?;
-            if result {
-                println!("key matches signature");
-            } else {
-                println!("key does not match signature");
-            }
+            emit(
+                if result {
+                    "key matches signature"
+                } else {
+                    "key does not match signature"
+                },
+                serde_json::json!({"success":result}),
+                &output,
+            )?;
         }
         Command::RecoverKey {
             token_a,
             token_b,
             raw,
             variants,
+            output,
         } => {
             let a = jwt::parse(&token_a)?;
             let b = jwt::parse(&token_b)?;
@@ -242,17 +290,20 @@ fn run() -> Result<(), Error> {
                 .or_else(|_| recover::recover_modulus(&a, &b, 3).map(|n| (n, 3)))?;
 
             if raw {
-                println!("{n:x}");
+                let hex = format!("{n:x}");
+                emit(&hex, serde_json::json!({ "modulus_hex": &hex }), &output)?;
             } else if variants {
-                for variant in recover::public_key_variants(&n, e) {
-                    print!("{variant}");
-                    if !variant.ends_with('\n') {
-                        println!();
-                    }
-                    println!();
-                }
+                let list = recover::public_key_variants(&n, e);
+                let text = list
+                    .iter()
+                    .enumerate()
+                    .map(|(i, pem)| format!("# variant {}\n{}", i + 1, pem.trim_end()))
+                    .collect::<Vec<String>>()
+                    .join("\n\n");
+                emit(&text, serde_json::json!({ "variants": &list }), &output)?;
             } else {
-                print!("{}", recover::public_key_pem(&n, e));
+                let pem = recover::public_key_pem(&n, e);
+                emit(pem.trim_end(), serde_json::json!({ "pem": &pem }), &output)?;
             }
         }
     }
@@ -260,18 +311,34 @@ fn run() -> Result<(), Error> {
     Ok(())
 }
 
-fn write_json(path: &str, value: &serde_json::Value) -> Result<(), Error> {
-    let pretty_string: String = serde_json::to_string_pretty(value)?;
-    std::fs::write(path, pretty_string)?;
+fn emit(text: &str, json: serde_json::Value, opts: &OutputArgs) -> Result<(), Error> {
+    let as_json = opts.out.is_some() || opts.json;
+
+    let body = if as_json {
+        serde_json::to_string_pretty(&json)?
+    } else {
+        text.to_string()
+    };
+
+    match &opts.out {
+        Some(path) => {
+            std::fs::write(path, format!("{body}\n"))?;
+        }
+        None => {
+            println!("{}", body);
+        }
+    }
+
     Ok(())
 }
 
 fn run_attack(
-    common: &CommonArgs,
+    input: &TokenArgs,
+    output: &OutputArgs,
     pairs: Vec<(String, serde_json::Value)>,
     attack: impl FnOnce(&mut jwt::Token) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let mut token = jwt::parse(&common.token)?;
+    let mut token = jwt::parse(&input.token)?;
     for (k, v) in pairs {
         token.set_claim(&k, v);
     }
@@ -279,12 +346,11 @@ fn run_attack(
     attack(&mut token)?;
     let encoded_token = token.encode()?;
 
-    if let Some(path) = &common.out {
-        let value = serde_json::json!({"jwt": encoded_token});
-        write_json(path, &value)?;
-    } else {
-        println!("{}", encoded_token)
-    }
+    emit(
+        &encoded_token,
+        serde_json::json!({"jwt": encoded_token}),
+        output,
+    )?;
     Ok(())
 }
 

@@ -77,7 +77,7 @@ fn der_len(n: usize) -> Vec<u8> {
 
 fn der_integer(value: &Natural) -> Vec<u8> {
     let mut content: Vec<u8> = value.to_power_of_2_digits_desc(8);
-    if content.first().map_or(true, |&b| b & 0x80 != 0) {
+    if content.first().is_none_or(|&b| b & 0x80 != 0) {
         content.insert(0, 0x00); // keep a high top bit from reading as negative
     }
     let mut out = vec![0x02];
@@ -214,7 +214,10 @@ mod tests {
     #[test]
     fn der_integer_pads_when_high_bit_set() {
         // 0x80 has its top bit set, so it needs a 0x00 sign pad.
-        assert_eq!(der_integer(&Natural::from(0x80u32)), vec![0x02, 0x02, 0x00, 0x80]);
+        assert_eq!(
+            der_integer(&Natural::from(0x80u32)),
+            vec![0x02, 0x02, 0x00, 0x80]
+        );
         // 0x7f does not.
         assert_eq!(der_integer(&Natural::from(0x7fu32)), vec![0x02, 0x01, 0x7f]);
     }
