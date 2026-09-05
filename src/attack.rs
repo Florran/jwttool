@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::jwt::Token;
+use crate::jwt::{HmacKind, Token};
 
 pub fn alg_none(token: &mut Token) -> Result<()> {
     token.set_alg("none")?;
@@ -13,21 +13,23 @@ const ASYMMETRIC_ALGORITHMS: &[&str] = &[
 ];
 
 pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<()> {
-    if !ASYMMETRIC_ALGORITHMS.contains(&token.header["alg"].as_str().unwrap_or("")) {
+    if !ASYMMETRIC_ALGORITHMS.contains(&token.alg()) {
         return Err(Error::InvalidAlgorithm(format!(
             "Token algorithm needs to be asymmetric, like {}",
             ASYMMETRIC_ALGORITHMS.join(", "),
         )));
     }
     token.set_alg("HS256")?;
-    token.sign_hs256(key)?;
+    let alg = HmacKind::HS256;
+    token.sign_hmac(alg, key)?;
     Ok(())
 }
 
 pub fn kid_injection(token: &mut Token, kid: serde_json::Value, key: &[u8]) -> Result<()> {
     token.set_header("kid", kid);
     token.set_alg("HS256")?;
-    token.sign_hs256(key)?;
+    let alg = HmacKind::HS256;
+    token.sign_hmac(alg, key)?;
     Ok(())
 }
 

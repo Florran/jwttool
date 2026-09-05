@@ -2,18 +2,60 @@ use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
 use hmac::{Hmac, KeyInit, Mac};
-use sha2::Sha256;
+use sha2::{Sha256, Sha384, Sha512};
 
 use crate::error::{Error, Result};
 
 type HmacSha256 = Hmac<Sha256>; // a type alias: "HMAC using SHA-256"
+type HmacSha384 = Hmac<Sha384>;
+type HmacSha512 = Hmac<Sha512>;
 
-const ALGORITHMS: &[&str] = &["none", "HS256"];
+const ALGORITHMS: &[&str] = &["none", "HS256", "HS384", "HS512"];
 
 pub struct Token {
     pub header: serde_json::Value,
     pub payload: serde_json::Value,
     pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+pub enum HmacKind {
+    HS256,
+    HS384,
+    HS512,
+}
+
+impl HmacKind {
+    pub fn from_alg(alg: &str) -> Result<Self> {
+        match alg {
+            "HS256" => Ok(HmacKind::HS256),
+            "HS384" => Ok(HmacKind::HS384),
+            "HS512" => Ok(HmacKind::HS512),
+            other => Err(Error::UnsupportedAlg(format!(
+                "Unsupported algorithm for HMAC: {other}"
+            ))),
+        }
+    }
+
+    fn mac(&self, signing_input: &[u8], key: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            HmacKind::HS256 => {
+                let mut mac = HmacSha256::new_from_slice(key)?;
+                mac.update(signing_input);
+                Ok(mac.finalize().into_bytes().to_vec())
+            }
+            HmacKind::HS384 => {
+                let mut mac = HmacSha384::new_from_slice(key)?;
+                mac.update(signing_input);
+                Ok(mac.finalize().into_bytes().to_vec())
+            }
+            HmacKind::HS512 => {
+                let mut mac = HmacSha512::new_from_slice(key)?;
+                mac.update(signing_input);
+                Ok(mac.finalize().into_bytes().to_vec())
+            }
+        }
+    }
 }
 
 pub fn parse(encoded: &str) -> Result<Token> {
@@ -44,6 +86,10 @@ impl Token {
 
         let encoded_token = [signing_input, encoded_signature].join(".");
         Ok(encoded_token)
+    }
+
+    pub fn alg(&self) -> &str {
+        self.header["alg"].as_str().unwrap_or("")
     }
 
     pub fn set_alg(&mut self, alg: &str) -> Result<()> {
@@ -78,27 +124,27 @@ impl Token {
         Ok(signing_input)
     }
 
-    pub fn sign_hs256(&mut self, key: &[u8]) -> Result<()> {
-        let mut mac = HmacSha256::new_from_slice(key)?;
-        mac.update(self.signing_input()?.as_bytes());
-        let result = mac.finalize().into_bytes();
-        self.signature = result.to_vec();
+    pub fn sign_hmac(&mut self, alg: HmacKind, key: &[u8]) -> Result<()> {
+        self.signature = alg.mac(self.signing_input()?.as_bytes(), key)?;
         Ok(())
     }
 
-    pub fn verify_hs256(&self, key: &[u8]) -> Result<bool> {
-        let signing_input = self.signing_input()?;
-        Ok(hmac_sha256_matches(&signing_input, key, &self.signature))
+    pub fn verify_hmac(&self, alg: HmacKind, key: &[u8]) -> Result<bool> {
+        Ok(hmac_matches(
+            &self.signing_input()?,
+            alg,
+            key,
+            &self.signature,
+        ))
     }
 }
 
-pub fn hmac_sha256_matches(signing_input: &str, key: &[u8], expected: &[u8]) -> bool {
-    let mut mac = match HmacSha256::new_from_slice(key) {
+pub fn hmac_matches(signing_input: &str, alg: HmacKind, key: &[u8], expected: &[u8]) -> bool {
+    let mac = match alg.mac(signing_input.as_bytes(), key) {
         Ok(m) => m,
         Err(_) => return false,
     };
-    mac.update(signing_input.as_bytes());
-    mac.verify_slice(expected).is_ok()
+    expected == mac
 }
 
 #[cfg(test)]
@@ -205,7 +251,7 @@ mod tests {
     #[test]
     fn sign_hs256_valid_signature_length() {
         let mut token = parse(VALID_TOKEN).unwrap();
-        token.sign_hs256(b"secret").unwrap();
+        token.sign_hmac(HmacKind::HS256, b"secret").unwrap();
 
         assert_eq!(token.signature.len(), 32);
     }
@@ -213,10 +259,10 @@ mod tests {
     #[test]
     fn sign_hs256_reproduces_twice() {
         let mut token = parse(VALID_TOKEN).unwrap();
-        token.sign_hs256(b"secret").unwrap();
+        token.sign_hmac(HmacKind::HS256, b"secret").unwrap();
 
         let mut token2 = parse(VALID_TOKEN).unwrap();
-        token2.sign_hs256(b"secret").unwrap();
+        token2.sign_hmac(HmacKind::HS256, b"secret").unwrap();
 
         assert_eq!(token.signature, token2.signature);
     }
@@ -224,10 +270,10 @@ mod tests {
     #[test]
     fn sign_hs256_different_secret_different_signature() {
         let mut token = parse(VALID_TOKEN).unwrap();
-        token.sign_hs256(b"secret").unwrap();
+        token.sign_hmac(HmacKind::HS256, b"secret").unwrap();
 
         let mut token2 = parse(VALID_TOKEN).unwrap();
-        token2.sign_hs256(b"secret2").unwrap();
+        token2.sign_hmac(HmacKind::HS256, b"secret2").unwrap();
 
         assert_ne!(token.signature, token2.signature);
     }
@@ -235,8 +281,39 @@ mod tests {
     #[test]
     fn verify_hs256_verifies_correctly() {
         let mut token = parse(VALID_TOKEN).unwrap();
-        token.sign_hs256(b"secret").unwrap();
-        assert!(token.verify_hs256(b"secret").unwrap());
-        assert!(!token.verify_hs256(b"notmysecret").unwrap());
+        token.sign_hmac(HmacKind::HS256, b"secret").unwrap();
+        assert!(token.verify_hmac(HmacKind::HS256, b"secret").unwrap());
+        assert!(!token.verify_hmac(HmacKind::HS256, b"notmysecret").unwrap());
+    }
+
+    #[test]
+    fn from_alg_maps_to_matching_hash_size() {
+        for (alg, len) in [("HS256", 32), ("HS384", 48), ("HS512", 64)] {
+            let kind = HmacKind::from_alg(alg).unwrap();
+            let mut token = parse(VALID_TOKEN).unwrap();
+            token.sign_hmac(kind, b"secret").unwrap();
+
+            assert_eq!(token.signature.len(), len, "{alg}");
+        }
+    }
+
+    #[test]
+    fn verify_hmac_round_trips_for_every_algorithm() {
+        for alg in ["HS256", "HS384", "HS512"] {
+            let kind = HmacKind::from_alg(alg).unwrap();
+            let mut token = parse(VALID_TOKEN).unwrap();
+            token.sign_hmac(kind, b"secret").unwrap();
+
+            assert!(token.verify_hmac(kind, b"secret").unwrap(), "{alg}");
+            assert!(!token.verify_hmac(kind, b"notmysecret").unwrap(), "{alg}");
+        }
+    }
+
+    #[test]
+    fn from_alg_rejects_unsupported() {
+        assert!(HmacKind::from_alg("RS256").is_err());
+        assert!(HmacKind::from_alg("ES256").is_err());
+        assert!(HmacKind::from_alg("none").is_err());
+        assert!(HmacKind::from_alg("").is_err());
     }
 }

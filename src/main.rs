@@ -52,7 +52,7 @@ enum Command {
         mode: AttackMode,
     },
 
-    /// Crack an HS256 secret using a wordlist
+    /// Crack an HMAC secret (HS256/HS384/HS512) using a wordlist
     Dictionary {
         #[command(flatten)]
         input: TokenArgs,
@@ -65,7 +65,7 @@ enum Command {
         wordlist: String,
     },
 
-    /// Check whether a key produces the token's signature
+    /// Check whether a key produces the token's HMAC signature (HS256/HS384/HS512)
     Verify {
         #[command(flatten)]
         input: TokenArgs,
@@ -78,7 +78,7 @@ enum Command {
         key: String,
     },
 
-    /// Derive RSA public key from two different tokens signed with the same private key
+    /// Derive an RSA public key from two tokens (RS256/RS384/RS512) signed with the same private key
     RecoverKey {
         /// First JWT to use for the public key recovery
         #[arg(short = 'a')]
@@ -117,7 +117,7 @@ enum AttackMode {
         pairs: Vec<(String, serde_json::Value)>,
     },
 
-    /// Re-sign an RS256 token as HS256 using a chosen key
+    /// Re-sign an asymmetric token (RS/PS/ES/EdDSA) as HS256 using a chosen key
     #[command(name = "alg-confusion")]
     AlgConfusion {
         #[command(flatten)]
@@ -130,7 +130,7 @@ enum AttackMode {
         #[arg(long = "set", value_parser = parse_key_val)]
         pairs: Vec<(String, serde_json::Value)>,
 
-        /// Key to sign with
+        /// Target's public key, used as the HMAC secret
         #[arg(long = "key")]
         key: String,
     },
@@ -158,7 +158,7 @@ enum AttackMode {
     },
 }
 
-/// JWT tampering tool for security testing
+/// JWT security testing toolkit
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -260,12 +260,8 @@ fn run() -> Result<(), Error> {
         }
         Command::Verify { input, key, output } => {
             let token = jwt::parse(&input.token)?;
-            if token.header["alg"] != "HS256" {
-                return Err(Error::UnsupportedAlg(
-                    "verify only supports HS256 tokens".into(),
-                ));
-            }
-            let result = token.verify_hs256(key.as_bytes())?;
+            let alg = jwt::HmacKind::from_alg(token.alg())?;
+            let result = token.verify_hmac(alg, key.as_bytes())?;
             emit(
                 if result {
                     "key matches signature"

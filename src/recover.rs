@@ -66,13 +66,13 @@ impl ShaKind {
 }
 
 pub fn recover_modulus(a: &Token, b: &Token, e: u32) -> Result<Natural> {
-    if a.header["alg"].as_str().unwrap_or("") != b.header["alg"].as_str().unwrap_or("") {
+    if a.alg() != b.alg() {
         return Err(Error::AlgorithmMismatch(
             "Both token algorithms need to match".into(),
         ));
     }
 
-    let alg = ShaKind::from_alg(a.header["alg"].as_str().unwrap_or(""))?;
+    let alg = ShaKind::from_alg(a.alg())?;
 
     let ka = multiple_of_n(a, alg, e)?;
     let kb = multiple_of_n(b, alg, e)?;

@@ -1,15 +1,11 @@
 use crate::error::Error;
-use crate::jwt::Token;
+use crate::jwt::{HmacKind, Token};
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub fn crack(token: &Token, candidates: &[String]) -> Result<Option<String>, Error> {
-    if token.header["alg"] != "HS256" {
-        return Err(Error::UnsupportedAlg(
-            "dictionary only supports HS256 tokens".into(),
-        ));
-    }
+    let alg = HmacKind::from_alg(token.alg())?;
 
     let n = std::thread::available_parallelism()?.get(); // get core count, for thread count
     let chunk_size = (candidates.len().div_ceil(n)).max(1);
@@ -32,11 +28,8 @@ pub fn crack(token: &Token, candidates: &[String]) -> Result<Option<String>, Err
                     if found.load(Ordering::Relaxed) {
                         break;
                     }
-                    if crate::jwt::hmac_sha256_matches(
-                        signing_input,
-                        candidate.as_bytes(),
-                        expected,
-                    ) {
+                    if crate::jwt::hmac_matches(signing_input, alg, candidate.as_bytes(), expected)
+                    {
                         found.store(true, Ordering::Relaxed);
                         *result.lock().unwrap() = Some(candidate.clone());
                         break;
