@@ -20,7 +20,7 @@ pub fn recover_modulus(a: &Token, b: &Token, e: u32) -> Result<Natural> {
             "Token algorithm needs to be from the RSA family for both tokens, like RS256".into(),
         ));
     }
-    if a.header["alg"].as_str().unwrap_or("") != a.header["alg"].as_str().unwrap_or("") {
+    if a.header["alg"].as_str().unwrap_or("") != b.header["alg"].as_str().unwrap_or("") {
         return Err(Error::AlgorithmMismatch(
             "Both token algorithms need to match".into(),
         ));
