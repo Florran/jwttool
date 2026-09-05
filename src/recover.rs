@@ -13,6 +13,19 @@ const SHA256_DIGEST_INFO: [u8; 19] = [
 ];
 
 pub fn recover_modulus(a: &Token, b: &Token, e: u32) -> Result<Natural> {
+    if !a.header["alg"].as_str().unwrap_or("").starts_with("RS")
+        || !b.header["alg"].as_str().unwrap_or("").starts_with("RS")
+    {
+        return Err(Error::InvalidAlgorithm(
+            "Token algorithm needs to be from the RSA family for both tokens, like RS256".into(),
+        ));
+    }
+    if a.header["alg"].as_str().unwrap_or("") != a.header["alg"].as_str().unwrap_or("") {
+        return Err(Error::AlgorithmMismatch(
+            "Both token algorithms need to match".into(),
+        ));
+    }
+
     let ka = multiple_of_n(a, e)?;
     let kb = multiple_of_n(b, e)?;
     let mut n = ka.gcd(kb);
