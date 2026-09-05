@@ -7,11 +7,17 @@ pub fn alg_none(token: &mut Token) -> Result<()> {
     Ok(())
 }
 
+const ASYMMETRIC_ALGORITHMS: &[&str] = &[
+    "RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512", "ES256K",
+    "EdDSA", "Ed25519", "Ed448",
+];
+
 pub fn alg_confusion(token: &mut Token, key: &[u8]) -> Result<()> {
-    if !token.header["alg"].as_str().unwrap_or("").starts_with("RS") {
-        return Err(Error::InvalidAlgorithm(
-            "Token needs to use asymmetric algorithm like RS256".into(),
-        ));
+    if !ASYMMETRIC_ALGORITHMS.contains(&token.header["alg"].as_str().unwrap_or("")) {
+        return Err(Error::InvalidAlgorithm(format!(
+            "Token algorithm needs to be asymmetric, like {}",
+            ASYMMETRIC_ALGORITHMS.join(", "),
+        )));
     }
     token.set_alg("HS256")?;
     token.sign_hs256(key)?;
@@ -57,6 +63,21 @@ mod tests {
 
         assert_eq!(token.signature.len(), 32);
         assert_eq!(token.header["alg"], "HS256");
+    }
+
+    #[test]
+    fn alg_confusion_accepts_asymmetric_algorithms() {
+        for alg in [
+            "RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512",
+            "ES256K", "EdDSA",
+        ] {
+            let mut token = sample_token();
+            token.set_header("alg", serde_json::Value::from(alg));
+
+            assert!(alg_confusion(&mut token, b"secret").is_ok(), "{alg}");
+            assert_eq!(token.header["alg"], "HS256");
+            assert_eq!(token.signature.len(), 32);
+        }
     }
 
     #[test]
